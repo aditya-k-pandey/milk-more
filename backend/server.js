@@ -14,17 +14,27 @@ connectDB();
 
 // ✅ Middlewares
 const allowedOrigins = [
-  "https://milk-more.netlify.app", // your frontend domain
-  "http://localhost:5173"          // for local testing
+  "https://milk-more.netlify.app",
+  "http://localhost:5173",
+  /\.netlify\.app$/   // ✅ allow all Netlify preview URLs
 ];
+
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.some(o => 
+            o instanceof RegExp ? o.test(origin) : o === origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
 );
+
 
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
