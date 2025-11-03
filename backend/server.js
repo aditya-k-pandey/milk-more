@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const connectDB = require("./db");
+const fs = require("fs");
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -38,15 +40,19 @@ app.get("/api/health", (req, res) => {
 // ✅ Serve Frontend (for production build)
 // ✅ Serve Frontend (for production build)
 // Serve Frontend (production build) — Vite uses "dist"
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+// ✅ Serve Frontend (only if dist exists)
+const distPath = path.join(__dirname, "../frontend/dist");
 
-  // named wildcard route compatible with path-to-regexp v6 / Express v5
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
-});
+if (process.env.NODE_ENV === "production" && fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
 
+  app.use((req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+} else {
+  console.log("⚠️  Frontend dist folder not found. Skipping static serve.");
 }
+
 
 
 
