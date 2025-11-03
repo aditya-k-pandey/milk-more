@@ -1,5 +1,6 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route, NavLink } from "react-router-dom";
+import Home from "./pages/Home.jsx";
 
 import AddEntry from "./pages/AddEntry.jsx";
 import DailySummary from "./pages/DailySummary.jsx";
@@ -51,6 +52,8 @@ export default function App() {
             <Route path="/month-payments/:monthCode" element={<MonthPayments />} /><Route path="/payments/:month" element={<MonthPayments />} />
             <Route path="/add-customer" element={<AddCustomerPage />} />
             <Route path="/customer/:id" element={<CustomerProfile />} />
+            <Route path="/test" element={<Home />} />
+
             
           </Routes>
         </main>
