@@ -37,13 +37,16 @@ app.get("/api/health", (req, res) => {
 
 // ✅ Serve Frontend (for production build)
 // ✅ Serve Frontend (for production build)
+// Serve Frontend (production build) — Vite uses "dist"
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist"))); // if you use Vite, change 'build' to 'dist'
+  app.use(express.static(path.join(__dirname, "../frontend/dist")));
 
-  app.get("/*", (req, res) => {
+  // named wildcard route compatible with path-to-regexp v6 / Express v5
+  app.get('/:path(.*)', (req, res) => {
     res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
   });
 }
+
 
 
 // ✅ Start Server
