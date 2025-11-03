@@ -14,7 +14,9 @@ export default function Customers() {
 
   async function fetchCustomers() {
     try {
-      const res = await axios.get("http://localhost:5000/api/customers");
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+      const res = await axios.get(`${API_BASE}/api/customers`);
+
       const raw = Array.isArray(res.data) ? res.data : [];
 
       // Sort by numeric part of id (C101 -> 101). If no digits, fallback to string compare.
@@ -92,9 +94,8 @@ export default function Customers() {
               {filtered.map((c, i) => (
                 <tr
                   key={i}
-                  className={`${
-                    i % 2 === 0 ? "bg-gray-800" : "bg-gray-900"
-                  } hover:bg-gray-700 transition`}
+                  className={`${i % 2 === 0 ? "bg-gray-800" : "bg-gray-900"
+                    } hover:bg-gray-700 transition`}
                 >
                   <td className="py-3 px-4">{c.id}</td>
                   <td className="py-3 px-4">{c.name}</td>
