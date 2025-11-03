@@ -13,7 +13,19 @@ const PORT = process.env.PORT || 5000;
 connectDB();
 
 // ✅ Middlewares
-app.use(cors());
+const allowedOrigins = [
+  "https://milk-more.netlify.app", // your frontend domain
+  "http://localhost:5173"          // for local testing
+];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
