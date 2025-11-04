@@ -85,6 +85,7 @@ export default function MonthlySummary() {
 
   // 🧾 Export PDF
   // 🧾 Export PDF
+  // 🧾 Export PDF
   const exportPDF = () => {
     if (!data || data.length === 0) {
       alert("No data to export!");
@@ -94,7 +95,10 @@ export default function MonthlySummary() {
     try {
       const doc = new jsPDF("p", "pt", "a4");
 
-      const fontUrl = `${window.location.origin}/src/assets/fonts/DejaVuSans.ttf`;
+      // ✅ Use public folder paths (works in production)
+      const fontUrl = "/fonts/DejaVuSans.ttf";
+      const logoPath = "/milk-logo.png";
+
       fetch(fontUrl)
         .then((res) => res.arrayBuffer())
         .then((fontData) => {
@@ -105,17 +109,14 @@ export default function MonthlySummary() {
           doc.addFont("DejaVuSans.ttf", "DejaVuSans", "normal");
           doc.setFont("DejaVuSans");
 
-          // 🧾 Company Header (like Receipt)
-          const logoPath = `${window.location.origin}/src/assets/milk-logo.png`;
-          const companyName = "Milk More";
-          const address = "Ghazipur, Uttar Pradesh";
-          const phone = "Ph: +91 98765 43210";
-
           const img = new Image();
           img.src = logoPath;
           img.onload = () => {
-            doc.addImage(img, "PNG", 250, 20, 90, 90);
+            const companyName = "Milk More";
+            const address = "Ghazipur, Uttar Pradesh";
+            const phone = "Ph: +91 98765 43210";
 
+            doc.addImage(img, "PNG", 250, 20, 90, 90);
             doc.setFontSize(18);
             doc.setTextColor(46, 139, 87);
             doc.text(companyName, 300, 130, { align: "center" });
@@ -125,12 +126,10 @@ export default function MonthlySummary() {
             doc.text(address, 300, 145, { align: "center" });
             doc.text(phone, 300, 160, { align: "center" });
 
-            // 🧾 Header Line
             doc.setDrawColor(46, 139, 87);
             doc.setLineWidth(1);
             doc.line(40, 175, 555, 175);
 
-            // 🧾 Customer Info
             const customer = customers.find((c) => c.id === selectedCustomer);
             const dateLabel = new Date(selectedMonth + "-01").toLocaleString("default", {
               month: "long",
@@ -153,11 +152,9 @@ export default function MonthlySummary() {
             doc.setTextColor(0);
             doc.text(dateLabel, 180, 230);
 
-            // 🧾 Second Header Line
             doc.setDrawColor(46, 139, 87);
             doc.line(40, 245, 555, 245);
 
-            // ✅ Table Setup
             const tableColumn = ["Date", "Litres", "Amount (₹)"];
             const formatDate = (d) => {
               const date = new Date(d);
@@ -203,43 +200,31 @@ export default function MonthlySummary() {
               alternateRowStyles: { fillColor: [245, 245, 245] },
             });
 
-            // ✅ Totals neatly placed just below table
-            // ✅ Totals aligned perfectly under the last column
             const table = doc.lastAutoTable;
-            const tableEndY = table.finalY + 40; // small gap under table
-
-            // get right edge of last column
+            const tableEndY = table.finalY + 40;
             const tableWidth = table.table?.width || 460;
             const tableX = table.settings.margin.left || 40;
             const rightAlignX = tableX + tableWidth - 10;
 
             doc.setFontSize(13);
-
-            // Total Litres
             doc.setTextColor(46, 139, 87);
             doc.text("Total Litres:", rightAlignX - 140, tableEndY, { align: "right" });
             doc.setTextColor(0);
             doc.text(`${totalLitres.toFixed(2)} L`, rightAlignX, tableEndY, { align: "right" });
 
-            // Total Amount
             doc.setTextColor(46, 139, 87);
             doc.text("Total Amount:", rightAlignX - 140, tableEndY + 25, { align: "right" });
             doc.setTextColor(0);
             doc.text(`₹ ${cleanNumber(totalAmount)}`, rightAlignX, tableEndY + 25, { align: "right" });
 
-
-
-
-            // ✅ Footer
             doc.setFontSize(10);
             doc.setTextColor(100);
             doc.text("Thank you for your business!", 300, doc.internal.pageSize.getHeight() - 40, {
               align: "center",
             });
 
-            // ✅ Save PDF
             doc.save(`MonthlySummary_${selectedMonth}.pdf`);
-          }; // ✅ this closing was missing!
+          };
         })
         .catch((err) => {
           console.error("Font load failed:", err);
@@ -250,6 +235,7 @@ export default function MonthlySummary() {
       alert("Error while exporting PDF!");
     }
   };
+
 
 
 
