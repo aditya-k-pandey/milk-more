@@ -21,22 +21,34 @@ app.use(express.json());
 
 // CORS: allow frontend origin (vite dev server). Use env FRONTEND_URL or default to localhost:5173
 const FRONTEND = process.env.FRONTEND_URL || "http://localhost:5173";
+
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // allow requests with no origin (like curl, server-to-server)
-      if (!origin) return callback(null, true);
-      if (origin === FRONTEND) return callback(null, true);
-      // allow localhost:5173 and localhost:3000 just in case
-      if (origin.includes("localhost:5173") || origin.includes("localhost:3000"))
-        return callback(null, true);
-
-      // anything else blocked
-      return callback(new Error("Not allowed by CORS"));
-    },
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:5173",
+      /\.netlify\.app$/,
+      /\.onrender\.com$/,
+    ],
     credentials: true,
   })
 );
+
+// app.use(
+//   cors({
+//     origin: function (origin, callback) {
+//       // allow requests with no origin (like curl, server-to-server)
+//       if (!origin) return callback(null, true);
+//       if (origin === FRONTEND) return callback(null, true);
+//       // allow localhost:5173 and localhost:3000 just in case
+//       if (origin.includes("localhost:5173") || origin.includes("localhost:3000"))
+//         return callback(null, true);
+
+//       // anything else blocked
+//       return callback(new Error("Not allowed by CORS"));
+//     },
+//     credentials: true,
+//   })
+// );
 
 // connect to mongo
 const mongoUrl = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/milkmore";
