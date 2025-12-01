@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { addCustomer } from "../api";
 
 export default function AddCustomerPage() {
   const [form, setForm] = useState({
@@ -16,11 +16,6 @@ export default function AddCustomerPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!form.id || !form.name) {
-      setMsg("Please fill in all required fields.");
-      return;
-    }
-
     try {
       const formData = new FormData();
       formData.append("id", form.id.toUpperCase());
@@ -29,21 +24,16 @@ export default function AddCustomerPage() {
       formData.append("defaultLitres", form.defaultLitres);
       if (form.photo) formData.append("photo", form.photo);
 
-      const res = await axios.post("http://localhost:5000/api/customers", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await addCustomer(formData);
 
-      if (res.data.success) {
-        setMsg("✅ Customer added successfully!");
-        setTimeout(() => navigate("/customers"), 1000);
-      } else {
-        setMsg(res.data.message || "Failed to add customer.");
-      }
+      setMsg("Customer added successfully!");
+      setTimeout(() => navigate("/customers"), 800);
     } catch (err) {
       console.error(err);
-      setMsg("Error while saving customer.");
+      setMsg(err.message || "Error saving customer");
     }
   };
+
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100 flex flex-col items-center py-10 px-4">
@@ -100,12 +90,21 @@ export default function AddCustomerPage() {
             <label className="block text-sm text-gray-300 mb-1">Default Litres</label>
             <input
               type="number"
-              step="0.1"
+              step="any"
+              min="0"
               value={form.defaultLitres}
-              onChange={(e) => setForm({ ...form, defaultLitres: e.target.value })}
+              onChange={(e) => {
+                const val = e.target.value;
+                setForm({
+                  ...form,
+                  defaultLitres: val === "" ? "" : parseFloat(val)
+                });
+              }}
+
               className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
             />
           </div>
+
 
           {/* Photo Upload */}
           <div className="sm:col-span-2">

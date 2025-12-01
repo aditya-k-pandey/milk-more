@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import Select from "react-select";
+
+// ✅ use API helper instead of axios
+import { getCustomers, addEntry } from "../api";
 
 function todayLocalYYYYMMDD() {
   const d = new Date();
@@ -24,10 +26,11 @@ export default function AddEntry() {
     setForm((f) => ({ ...f, date: todayLocalYYYYMMDD() }));
   }, []);
 
+  // ✅ FIXED — use getCustomers() (token included)
   async function fetchCustomers() {
     try {
-      const res = await axios.get("http://localhost:5000/api/customers");
-      const list = Array.isArray(res.data) ? res.data : res.data.data || [];
+      const res = await getCustomers();
+      const list = Array.isArray(res) ? res : res.data || [];
       setCustomers(list);
     } catch (err) {
       console.error("fetchCustomers error:", err);
@@ -36,17 +39,24 @@ export default function AddEntry() {
   }
 
   function onCustomerChange(selectedOption) {
+    if (!selectedOption) {
+      setForm((f) => ({ ...f, customerId: "", litres: "" }));
+      return;
+    }
+
     const cust = customers.find(
-      (c) => String(c._id || c.id) === String(selectedOption?.value)
+      (c) => String(c._id) === String(selectedOption.value)
     );
 
     setForm((f) => ({
       ...f,
-      customerId: selectedOption ? selectedOption.value : "",
+      customerId: String(selectedOption.value),   // ALWAYS MongoDB _id
       litres: cust ? String(cust.defaultLitres || "") : "",
     }));
   }
 
+
+  // 🔥 FIXED — send entry using addEntry()
   async function handleSave(e) {
     e.preventDefault();
     setMsg("Saving...");
@@ -68,53 +78,52 @@ export default function AddEntry() {
     }
 
     try {
-      const res = await axios.post("http://localhost:5000/api/entries", payload);
-      if (res.data && res.data.success) {
-        setMsg(res.data.message || "Saved ✓");
+      const res = await addEntry(payload.date, payload.customerId, payload.litres);
+
+      if (res.success) {
+        setMsg(res.message || "Saved ✓");
+
         const cust = customers.find(
           (c) => String(c._id || c.id) === String(form.customerId)
         );
+
         setForm({
           ...form,
           litres: cust ? String(cust.defaultLitres || "") : "",
           date: todayLocalYYYYMMDD(),
         });
 
-        // ✅ Auto refresh page data after save
-        setTimeout(() => {
-          window.location.reload();
-        }, 100);
-      }
-      else {
-        setMsg(res.data?.message || "Save failed.");
+        setTimeout(() => window.location.reload(), 100);
+      } else {
+        setMsg(res?.message || "Save failed.");
       }
     } catch (err) {
       console.error("save error:", err);
-      setMsg(err.response?.data?.message || "Error saving entry.");
+      setMsg(err.message || "Error saving entry.");
     }
   }
 
   // Convert customers into react-select options
   const customerOptions = customers.map((c) => ({
-    value: String(c._id || c.id),
+    value: String(c._id),                    // ✅ FIX: always use MongoDB _id
     label: c.id ? `${c.id} — ${c.name}` : c.name,
   }));
 
+
+
+
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white px-4">
-      {/* App Heading */}
       <h1 className="text-5xl font-extrabold text-white mb-10 tracking-wide text-center">
         🥛 Milk More
       </h1>
 
-      {/* Form Card */}
       <div className="bg-gray-950 p-8 rounded-2xl shadow-lg w-full max-w-md border border-gray-800">
         <h2 className="text-2xl font-semibold text-white mb-6 text-center">
           Add Milk Entry
         </h2>
 
         <form onSubmit={handleSave} className="space-y-5">
-          {/* Date */}
           <div>
             <label className="block text-sm text-gray-300 mb-1">Date</label>
             <input
@@ -125,7 +134,6 @@ export default function AddEntry() {
             />
           </div>
 
-          {/* Customer */}
           <div>
             <label className="block text-sm text-gray-300 mb-1">Customer</label>
             <Select
@@ -137,41 +145,9 @@ export default function AddEntry() {
               placeholder="-- Select or Search Customer --"
               isClearable
               isSearchable
-              styles={{
-                control: (base) => ({
-                  ...base,
-                  backgroundColor: "#1f2937",
-                  borderColor: "#374151",
-                  color: "#fff",
-                }),
-                menu: (base) => ({
-                  ...base,
-                  backgroundColor: "#1f2937",
-                  color: "#fff",
-                }),
-                singleValue: (base) => ({ ...base, color: "#fff" }),
-                input: (base) => ({ ...base, color: "#fff" }),
-                option: (base, { isFocused }) => ({
-                  ...base,
-                  backgroundColor: isFocused ? "#374151" : "#1f2937",
-                  color: "#fff",
-                }),
-              }}
             />
-
-            {form.customerId && (
-              <div className="text-sm text-gray-400 mt-1">
-                {(() => {
-                  const cust = customers.find(
-                    (c) => String(c._id || c.id) === String(form.customerId)
-                  );
-                  return cust ? `Name: ${cust.name}` : "Customer not found";
-                })()}
-              </div>
-            )}
           </div>
 
-          {/* Litres */}
           <div>
             <label className="block text-sm text-gray-300 mb-1">Litres</label>
             <input
@@ -183,18 +159,16 @@ export default function AddEntry() {
             />
           </div>
 
-          {/* Save Button */}
           <div className="flex justify-center items-center mt-6">
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 hover:cursor-pointer transition duration-200 shadow-md"
+              className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-500 transition duration-200 shadow-md"
             >
               Save
             </button>
           </div>
         </form>
 
-        {/* Message */}
         {msg && <p className="text-sm text-gray-400 text-center mt-4">{msg}</p>}
       </div>
     </div>

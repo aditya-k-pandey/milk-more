@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import { getDailyEntries } from "../api";   // <-- add this import
+
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -26,27 +27,46 @@ export default function DailySummary() {
   const [msg, setMsg] = useState("");
 
   // ✅ Load data for given date
+  // ✅ Load data for given date (robust to many API shapes)
   const load = async (selectedDate = date) => {
     try {
       setMsg("Loading...");
-      const res = await axios.get(
-        `http://localhost:5000/api/entries/daily?date=${selectedDate}`
-      );
 
-      console.log("Daily summary data:", res.data);
+      // getDailyEntries returns parsed JSON (not axios response)
+      const res = await getDailyEntries(selectedDate);
 
-      const sorted = Array.isArray(res.data)
-        ? res.data.sort((a, b) => new Date(a.date) - new Date(b.date))
+      // Debug — see exact response shape in console
+      console.log("Daily summary raw response:", res);
+
+      // Normalize payload to an array
+      // Cases handled:
+      // 1) backend returns array -> res = [ ... ]
+      // 2) backend returns { success: true, data: [...] } -> res.data = [...]
+      // 3) axios-style (unlikely here) -> res.data may exist
+      const payload = res && res.data !== undefined ? res.data : res;
+      const list =
+        Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+
+      // sort and set
+      const sorted = Array.isArray(list)
+        ? [...list].sort((a, b) => {
+          // sort safely even if id is ObjectId. Use string fallback.
+          const A = (a._id || a.id || a.customerId || "").toString();
+          const B = (b._id || b.id || b.customerId || "").toString();
+          return A.localeCompare(B);
+        })
         : [];
 
       setRows(sorted);
       setMsg("");
     } catch (e) {
-      console.error(e);
+      console.error("load() error:", e);
       alert("Cannot load daily data");
+      setRows([]);
       setMsg("Error loading data");
     }
   };
+
 
   // ✅ Initial load
   useEffect(() => {
@@ -233,13 +253,12 @@ export default function DailySummary() {
                 rows.map((r, i) => (
                   <tr
                     key={i}
-                    className={`${
-                      i % 2 === 0 ? "bg-gray-900" : "bg-gray-800"
-                    } hover:bg-gray-700/80 transition`}
+                    className={`${i % 2 === 0 ? "bg-gray-900" : "bg-gray-800"
+                      } hover:bg-gray-700/80 transition`}
                   >
                     <td className="px-4 py-3 border border-gray-700">{i + 1}</td>
-                    <td className="px-4 py-3 border border-gray-700">{r.customerId}</td>
-                    <td className="px-4 py-3 border border-gray-700">{r.customerName}</td>
+                    <td className="px-4 py-3 border border-gray-700">{r.customerId?.id}</td>
+                    <td className="px-4 py-3 border border-gray-700">{r.customerId?.name}</td>
                     <td className="px-4 py-3 border border-gray-700 text-right">{r.litres}</td>
                     <td className="px-4 py-3 border border-gray-700 text-right">
                       ₹{r.amount}

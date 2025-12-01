@@ -1,82 +1,66 @@
+// server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
 const path = require("path");
-const connectDB = require("./db");
-const fs = require("fs");
 
+// routes
+const userRoutes = require("./routes/UserRoutes");
+const dailySummaryRoutes = require("./routes/DailySummaryRoutes");
+const customerRoutes = require("./routes/CustomerRoutes");
+const entryRoutes = require("./routes/entryRoutes");
+const paymentRoutes = require("./routes/PaymentRoutes");
+const receiptRoutes = require("./routes/ReceiptRoutes");
+const passwordRoutes = require("./routes/passwordRoutes");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-// ✅ Connect Database
-connectDB();
+// parse JSON
+app.use(express.json());
 
-// ✅ Middlewares
-const allowedOrigins = [
-  "https://milk-more.netlify.app",
-  "http://localhost:5173",
-  /\.netlify\.app$/   // ✅ allow all Netlify preview URLs
-];
-
-
+// CORS: allow frontend origin (vite dev server). Use env FRONTEND_URL or default to localhost:5173
+const FRONTEND = process.env.FRONTEND_URL || "http://localhost:5173";
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some(o => 
-            o instanceof RegExp ? o.test(origin) : o === origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+    origin: function (origin, callback) {
+      // allow requests with no origin (like curl, server-to-server)
+      if (!origin) return callback(null, true);
+      if (origin === FRONTEND) return callback(null, true);
+      // allow localhost:5173 and localhost:3000 just in case
+      if (origin.includes("localhost:5173") || origin.includes("localhost:3000"))
+        return callback(null, true);
+
+      // anything else blocked
+      return callback(new Error("Not allowed by CORS"));
     },
-    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
 );
 
+// connect to mongo
+const mongoUrl = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/milkmore";
+mongoose
+  .connect(mongoUrl, {
+    tls: true,
+    tlsAllowInvalidCertificates: false,
+  })
 
-app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.log("MongoDB error", err));
 
-// ✅ Route Imports
-const customerRoutes = require("./routes/CustomerRoutes");
-const entryRoutes = require("./routes/entryRoutes");
-const dailySummaryRoutes = require("./routes/DailySummaryRoutes");
-const receiptRoutes = require("./routes/ReceiptRoutes"); // <-- ✅ ADD THIS
-const paymentRoutes = require("./routes/PaymentRoutes");
-
-
-// ✅ Use Routes
+app.use("/api/user", userRoutes);
+app.use("/api/daily", dailySummaryRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/entries", entryRoutes);
-app.use("/api/daily-summary", dailySummaryRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/receipts", receiptRoutes);
-app.use("/api/payments", paymentRoutes); 
+app.use("/api/password", passwordRoutes);
+app.use("/api/admin", require("./routes/adminRoutes"));
 
-// ✅ Health Check
-app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "OK", message: "API running fine", time: new Date() });
+
+
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+  console.log("🚀 Server running on port", port);
 });
-
-// ✅ Serve Frontend (for production build)
-// ✅ Serve Frontend (for production build)
-// Serve Frontend (production build) — Vite uses "dist"
-// ✅ Serve Frontend (only if dist exists)
-const distPath = path.join(__dirname, "../frontend/dist");
-
-if (process.env.NODE_ENV === "production" && fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-
-  app.use((req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
-  });
-} else {
-  console.log("⚠️  Frontend dist folder not found. Skipping static serve.");
-}
-
-
-
-
-// ✅ Start Server
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

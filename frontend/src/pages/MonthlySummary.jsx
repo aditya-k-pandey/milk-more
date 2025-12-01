@@ -4,6 +4,10 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+import { getCustomers } from "../api";
+import { getMonthlyEntries } from "../api";
+
+
 
 export default function MonthlySummary() {
   const [customers, setCustomers] = useState([]);
@@ -21,11 +25,18 @@ export default function MonthlySummary() {
 
   // ✅ Fetch customers
   useEffect(() => {
-    axios
-      .get("http://localhost:5000/api/customers")
-      .then((res) => setCustomers(res.data))
-      .catch((err) => console.error("Error fetching customers:", err));
+    async function loadCustomers() {
+      try {
+        const res = await getCustomers();  // sends token ✔
+        setCustomers(Array.isArray(res) ? res : []);
+      } catch (err) {
+        console.error("Error fetching customers:", err);
+        alert("Failed to load customers.");
+      }
+    }
+    loadCustomers();
   }, []);
+
 
   // ✅ Close dropdown when clicking outside
   useEffect(() => {
@@ -55,21 +66,21 @@ export default function MonthlySummary() {
     const [year, month] = selectedMonth.split("-");
 
     try {
-      const res = await axios.get("http://localhost:5000/api/entries/monthly", {
-        params: { customerId: selectedCustomer, month, year },
-      });
+      const res = await getMonthlyEntries(selectedCustomer, month, year);
+
 
       // 🧾 Filter entries strictly by selected month & year (to remove Oct 31 issue)
       const selectedMonthNum = parseInt(month);
       const selectedYearNum = parseInt(year);
 
-      const filtered = res.data.filter((entry) => {
+      const filtered = res.filter((entry) => {
         const entryDate = new Date(entry.date);
         return (
           entryDate.getMonth() + 1 === selectedMonthNum &&
           entryDate.getFullYear() === selectedYearNum
         );
       });
+
 
       setData(filtered);
     } catch (err) {
@@ -130,7 +141,7 @@ export default function MonthlySummary() {
             doc.setLineWidth(1);
             doc.line(40, 175, 555, 175);
 
-            const customer = customers.find((c) => c.id === selectedCustomer);
+            const customer = customers.find((c) => c._id === selectedCustomer);
             const dateLabel = new Date(selectedMonth + "-01").toLocaleString("default", {
               month: "long",
               year: "numeric",
@@ -314,7 +325,7 @@ export default function MonthlySummary() {
                   <div
                     key={c._id}
                     onClick={() => {
-                      setSelectedCustomer(c.id);
+                      setSelectedCustomer(c._id);
                       setCustomerSearch(`${c.name} (${c.id})`);
                       setDropdownOpen(false);
                     }}
