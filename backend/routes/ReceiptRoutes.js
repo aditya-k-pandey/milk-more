@@ -1,215 +1,264 @@
 const express = require("express");
 const router = express.Router();
 const PDFDocument = require("pdfkit");
+const mongoose = require("mongoose");
+
+const auth = require("../middleware/auth");
 const Entry = require("../models/Entry");
 const Customer = require("../models/Customer");
-const path = require("path");
-const fs = require("fs");
 
-// 🧾 Beautiful Monthly Receipt PDF (centered columns + proper ₹ glyph via Unicode font)
-router.get("/monthly-receipt", async (req, res) => {
+/* ----------------------------- Helpers ----------------------------- */
+
+// Format Date (dd-MMM-yyyy)
+function fmt(d) {
+  const x = new Date(d);
+  if (isNaN(x)) return "";
+  return x.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// First & Last day of month
+function monthRange(year, month) {
+  const m = month - 1;
+  return {
+    start: new Date(year, m, 1),
+    end: new Date(year, m + 1, 1),
+  };
+}
+
+// MonthlySummary Header Style
+function addPDFHeader(doc) {
+  doc
+    .fontSize(30)
+    .fillColor("#2E8B57")
+    .text("Milk More", { align: "center" });
+
+  doc
+    .fontSize(14)
+    .fillColor("#555")
+    .text("Fresh Milk", { align: "center" });
+
+  doc.moveDown(1);
+}
+
+// Table header
+function drawTableHeader(doc, y) {
+  doc
+    .fontSize(14)
+    .fillColor("#2E8B57")
+    .text("Date", 60, y)
+    .text("Litres", 230, y, { width: 100 })
+    .text("Amount (₹)", 380, y);
+
+  doc.moveTo(50, y + 18).lineTo(550, y + 18).stroke("#2E8B57");
+
+  return y + 30;
+}
+
+// Table rows (with padding like MonthlySummary)
+function drawTableRows(doc, entries, startY) {
+  let y = startY;
+  let totalLitres = 0;
+  let totalAmount = 0;
+
+  doc.fontSize(12).fillColor("#000");
+
+  entries.forEach((e, i) => {
+    const rowY = y + i * 25;
+
+    doc.text(fmt(e.date), 60, rowY);
+    doc.text(e.litres.toString(), 240, rowY, { width: 100 });
+    doc.text(`₹${e.amount}`, 380, rowY);
+
+    totalLitres += e.litres;
+    totalAmount += e.amount;
+  });
+
+  return {
+    endY: y + entries.length * 25 + 10,
+    totalLitres,
+    totalAmount,
+  };
+}
+
+/* -------------------------------------------------------------------
+    1️⃣  AUTHENTICATED IN-APP RECEIPT
+--------------------------------------------------------------------*/
+router.get("/monthly-receipt", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { customerId, month, year } = req.query;
-    if (!customerId || !month || !year) {
-      return res.status(400).json({ message: "Missing required params" });
-    }
 
-    const customer = await Customer.findOne({ id: customerId });
+    if (!customerId || !month || !year)
+      return res.status(400).json({ message: "Missing params" });
+
+    // Correct customer for this seller
+    const customer =
+      await Customer.findOne({ sellerId, _id: customerId }) ||
+      await Customer.findOne({ sellerId, id: customerId });
     if (!customer) return res.status(404).json({ message: "Customer not found" });
 
-    const monthStr = String(month).padStart(2, "0");
-    const startDate = `${year}-${monthStr}-01`;
-    const endDate = new Date(Number(year), Number(month), 0).toISOString().split("T")[0];
+    // compute start/end as Dates (already present)
+    const { start, end } = monthRange(year, month);
 
+    // convert to YYYY-MM-DD strings because Entry.date is stored as string
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = end.toISOString().slice(0, 10);
 
-    // keep your date string logic (ISO-like)
+    // query using string range
     const entries = await Entry.find({
-      customerId,
-      date: { $gte: startDate, $lte: endDate },
+      sellerId,
+      customerId: customer._id,
+      date: { $gte: startStr, $lt: endStr }
     }).sort({ date: 1 });
 
-    if (!entries.length)
-      return res.status(404).json({ message: "No entries found for this month" });
 
-    const totalLitres = entries.reduce((sum, e) => sum + (e.litres || 0), 0);
-    const totalAmount = entries.reduce((sum, e) => sum + (e.amount || 0), 0);
-
-    // ---------------- PDF SETUP ----------------
+    // PDF response
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename=${customerId}_${monthStr}_${year}.pdf`
-    );
+    res.setHeader("Content-Disposition", `inline; filename=${customerId}.pdf`);
 
-    const doc = new PDFDocument({ margin: 50, size: "A4" });
-
-    // try to register a Unicode font (for ₹). Put DejaVuSans.ttf in backend/assets/fonts/
-    const fontPath = path.join(__dirname, "..", "assets", "fonts", "DejaVuSans.ttf");
-    let useUnicodeFont = false;
-    if (fs.existsSync(fontPath)) {
-      doc.registerFont("DejaVu", fontPath);
-      useUnicodeFont = true;
-      doc.font("DejaVu");
-    } else {
-      // fallback to default
-      doc.font("Helvetica");
-    }
-
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
     doc.pipe(res);
 
-    // ---------- LOGO + HEADER ----------
-    const logoPath = path.join(__dirname, "..", "assets", "milk-logo.png");
-    try { if (fs.existsSync(logoPath)) doc.image(logoPath, 50, 40, { width: 56, height: 56 }); } catch (err) { /* ignore */ }
+    addPDFHeader(doc);
 
-    doc
-      .fontSize(28)
-      .fillColor("#2E8B57")
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold")
-      .text("Milk More", 120, 48, { continued: false });
-
-    doc
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica")
-      .fontSize(12)
-      .fillColor("#666")
-      .text("Fresh Milk", 120, 78);
-
-    // Divider
-    // ---------- TITLE (center) ----------
-    const monthLabel = new Date(Number(year), Number(month) - 1, 1).toLocaleString("default", {
+    const monthName = new Date(year, month - 1).toLocaleString("default", {
       month: "long",
       year: "numeric",
     });
 
-    doc.moveDown(1);
     doc
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold")
-      .fontSize(20)
+      .fontSize(18)
       .fillColor("#2E8B57")
-      .text("Monthly Receipt", { align: "center" });
-
-    // straight divider line directly under title
-    const titleY = doc.y + 5;
-    doc.moveTo(50, titleY).lineTo(545, titleY).lineWidth(2).stroke("#2E8B57");
+      .text("Monthly Receipt", { align: "center" })
+      .moveDown();
 
     doc
-      .moveDown(0.5)
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica")
-      .fontSize(12)
-      .fillColor("#000")
-      .text(`Month: ${monthLabel}`, { align: "center" });
-
-    doc.moveDown(0.8);
-
-    // ---------- CUSTOMER DETAILS (left) ----------
-    const leftX = 50;
-    doc
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold")
       .fontSize(13)
-      .fillColor("#2E8B57")
-      .text("Customer Details", leftX);
-
-    doc
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica")
-      .fontSize(11)
       .fillColor("#000")
-      .moveDown(0.2)
-      .text(`Name: ${customer.name}`, leftX)
-      .text(`Customer ID: ${customer.id}`, leftX)
-      .text(`Phone: ${customer.phone || "N/A"}`, leftX);
+      .text(`Customer: ${customer.name}`)
+      .text(`Customer ID: ${customer.id}`)
+      .text(`Phone: ${customer.phone}`)
+      .text(`Month: ${monthName}`)
+      .moveDown();
 
-    doc.moveDown(0.6);
+    let y = drawTableHeader(doc, doc.y);
+    const { endY, totalLitres, totalAmount } = drawTableRows(doc, entries, y);
 
-    // ---------- TABLE HEADER ----------
-    const tableTop = doc.y + 6;
-    const tableX = 50;
-    const tableW = 495;
-
-    // define column widths (sum <= tableW)
-    const colWidths = { date: 140, litres: 110, rate: 125, amount: 120 };
-    const colX = {
-      date: tableX + 10,
-      litres: tableX + 10 + colWidths.date,
-      rate: tableX + 10 + colWidths.date + colWidths.litres,
-      amount: tableX + 10 + colWidths.date + colWidths.litres + colWidths.rate,
-    };
-
-    // header background
-    doc.rect(tableX, tableTop - 6, tableW, 28).fill("#2E8B57");
-
-    // header labels centered in each column
+    // Totals - matching MonthlySummary
     doc
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold")
-      .fontSize(11)
-      .fillColor("#FFFFFF")
-      .text("Date", colX.date, tableTop, { width: colWidths.date, align: "center" })
-      .text("Litres", colX.litres, tableTop, { width: colWidths.litres, align: "center" })
-      .text("Rate per Litre (₹)", colX.rate, tableTop, { width: colWidths.rate, align: "center" })
-      .text("Amount (₹)", colX.amount, tableTop, { width: colWidths.amount, align: "center" });
+      .fontSize(15)
+      .fillColor("#2E8B57")
+      .text(`Total Litres: ${totalLitres}`, 60, endY + 15)
+      .text(`Total Amount: ₹${totalAmount}`, 60, endY + 40);
 
-    // ---------- TABLE BODY ----------
-    let y = tableTop + 34;
-    const rowH = 24;
-    doc.font(useUnicodeFont ? "DejaVu" : "Helvetica").fontSize(11).fillColor("#000");
+    doc.moveDown().fontSize(12).fillColor("#444").text("Thank you!", { align: "center" });
 
-    entries.forEach((e, i) => {
-      const bg = i % 2 === 0 ? "#F7F7F7" : "#FFFFFF";
-      const d = new Date(e.date);
-      const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-      const dateStr = `${String(d.getDate()).padStart(2, "0")}-${months[d.getMonth()]}-${d.getFullYear()}`;
-
-      const rate = (e.litres && e.amount) ? (e.amount / e.litres) : 0;
-
-      // row background
-      doc.rect(tableX, y - 6, tableW, rowH).fill(bg).stroke();
-
-      // center aligned cells
-      doc.fillColor("#000")
-        .text(dateStr, colX.date, y - 2, { width: colWidths.date, align: "center" })
-        .text(e.litres != null ? e.litres.toFixed(2) : "0.00", colX.litres, y - 2, { width: colWidths.litres, align: "center" });
-
-      // amount & rate formatting
-      const rateText = useUnicodeFont ? `₹${rate.toFixed(2)}` : `Rs. ${rate.toFixed(2)}`;
-      const amountText = useUnicodeFont
-        ? `₹${(e.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-        : `Rs. ${(e.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
-
-      doc.text(rateText, colX.rate, y - 2, { width: colWidths.rate, align: "center" })
-        .text(amountText, colX.amount, y - 2, { width: colWidths.amount, align: "center" });
-
-      y += rowH;
-
-      // page break guard
-      if (y > doc.page.height - 140) {
-        doc.addPage();
-        y = 80;
-      }
-    });
-
-    // ---------- TOTALS BOX ----------
-    y += 12;
-    const totalsBoxX = 320;
-    const totalsBoxW = 225;
-    const totalsBoxH = 60;
-
-    doc.roundedRect(totalsBoxX, y, totalsBoxW, totalsBoxH, 4).fill("#EAF7EC").stroke();
-    doc.font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold").fontSize(12).fillColor("#2E8B57")
-      .text("Total Litres:", totalsBoxX + 12, y + 10)
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold").fillColor("#000")
-      .text(`${totalLitres.toFixed(2)} L`, totalsBoxX + 120, y + 10, { width: 80, align: "right" });
-
-    const totalAmountText = useUnicodeFont
-      ? `₹${totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
-      : `Rs. ${totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
-
-    doc.font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold").fontSize(12).fillColor("#2E8B57")
-      .text("Total Amount:", totalsBoxX + 12, y + 32)
-      .font(useUnicodeFont ? "DejaVu" : "Helvetica-Bold").fillColor("#000")
-      .text(totalAmountText, totalsBoxX + 120, y + 32, { width: 80, align: "right" });
-
-    // finish PDF (no footer weird chars)
     doc.end();
   } catch (err) {
-    console.error("Receipt generation error:", err);
+    console.error("Receipt error:", err);
+    res.status(500).json({ message: "Error generating receipt" });
+  }
+});
+
+/* -------------------------------------------------------------------
+    2️⃣  PUBLIC WHATSAPP RECEIPT
+--------------------------------------------------------------------*/
+router.get("/monthly-receipt-public", async (req, res) => {
+  try {
+    const { sellerId, customerId, month, year } = req.query;
+
+    if (!sellerId || !customerId || !month || !year)
+      return res.status(400).json({ message: "Missing params" });
+
+    // Must match correct seller
+    // extract from query
+
+    // Convert sellerId string → ObjectId
+    const sellerObjId = new mongoose.Types.ObjectId(sellerId);
+
+    // 1️⃣ Try find by string customerId (C101)
+    let customer = await Customer.findOne({
+      sellerId: sellerObjId,
+      id: customerId
+    });
+
+    // 2️⃣ If not found, try MongoDB _id
+    if (!customer && mongoose.isValidObjectId(customerId)) {
+      customer = await Customer.findOne({
+        sellerId: sellerObjId,
+        _id: customerId
+      });
+    }
+
+    // If still not found → return clean error
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+
+
+
+    const { start, end } = monthRange(year, month);
+
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = end.toISOString().slice(0, 10);
+
+    const entries = await Entry.find({
+      sellerId: sellerObjId,
+      customerId: customer._id,
+      date: { $gte: startStr, $lt: endStr }
+    }).sort({ date: 1 });
+
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename=receipt-${customer.id}-${month}-${year}.pdf`
+    );
+
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    doc.pipe(res);
+
+    addPDFHeader(doc);
+
+    const monthName = new Date(year, month - 1).toLocaleString("default", {
+      month: "long",
+      year: "numeric",
+    });
+
+    doc
+      .fontSize(18)
+      .fillColor("#2E8B57")
+      .text("Monthly Receipt", { align: "center" })
+      .moveDown();
+
+    doc
+      .fontSize(13)
+      .fillColor("#000")
+      .text(`Customer: ${customer.name}`)
+      .text(`Customer ID: ${customer.id}`)
+      .text(`Phone: ${customer.phone}`)
+      .text(`Month: ${monthName}`)
+      .moveDown();
+
+    let y = drawTableHeader(doc, doc.y);
+    const { endY, totalLitres, totalAmount } = drawTableRows(doc, entries, y);
+
+    doc
+      .fontSize(15)
+      .fillColor("#2E8B57")
+      .text(`Total Litres: ${totalLitres}`, 60, endY + 15)
+      .text(`Total Amount: ₹${totalAmount}`, 60, endY + 40);
+
+    doc.moveDown().fontSize(12).fillColor("#444").text("Thank you!", { align: "center" });
+
+    doc.end();
+  } catch (err) {
+    console.error("PUBLIC receipt error:", err);
     res.status(500).json({ message: "Error generating receipt" });
   }
 });

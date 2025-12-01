@@ -1,25 +1,35 @@
 // src/pages/Customers.jsx
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import { FaSearch, FaUserPlus } from "react-icons/fa";
+import { getCustomers } from "../api";
 
 export default function Customers() {
   const [list, setList] = useState([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetchCustomers();
+    async function load() {
+      try {
+        const res = await getCustomers();
+        console.log("customers:", res);
+        setList(Array.isArray(res) ? res : []);
+      } catch (err) {
+        console.error("fetchCustomers error:", err);
+        alert("Error fetching customers. Make sure you are logged in.");
+      }
+    }
+    load();
   }, []);
 
-  async function fetchCustomers() {
+
+  async function loadCustomers() {
     try {
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
-      const res = await axios.get(`${API_BASE}/api/customers`);
+      const res = await getCustomers(); // ✅ USE API.JS FUNCTION
+      console.log("customers:", res);
 
-      const raw = Array.isArray(res.data) ? res.data : [];
+      const raw = Array.isArray(res) ? res : [];
 
-      // Sort by numeric part of id (C101 -> 101). If no digits, fallback to string compare.
       raw.sort((a, b) => {
         const aNum = parseInt(String(a.id || "").replace(/\D/g, ""), 10);
         const bNum = parseInt(String(b.id || "").replace(/\D/g, ""), 10);
@@ -31,13 +41,12 @@ export default function Customers() {
         if (aHasNum && !bHasNum) return -1;
         if (!aHasNum && bHasNum) return 1;
 
-        // fallback to case-insensitive string compare
         return String(a.id || "").localeCompare(String(b.id || ""), undefined, { sensitivity: "base" });
       });
 
       setList(raw);
     } catch (err) {
-      console.error(err);
+      console.log(err);
       alert("Error fetching customers");
     }
   }
@@ -54,7 +63,6 @@ export default function Customers() {
         🧾 Customers
       </h1>
 
-      {/* Search and Add */}
       <div className="flex justify-between items-center mb-6 max-w-3xl mx-auto">
         <div className="flex items-center bg-gray-900 rounded-lg px-3 w-2/3">
           <FaSearch className="text-gray-400 mr-2" />
@@ -75,7 +83,6 @@ export default function Customers() {
         </Link>
       </div>
 
-      {/* Customer List */}
       <div className="max-w-3xl mx-auto bg-gray-950 rounded-lg shadow-lg border border-gray-800">
         {filtered.length === 0 ? (
           <p className="text-center text-gray-400 py-6">No customers found</p>

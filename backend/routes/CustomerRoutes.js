@@ -1,13 +1,12 @@
 const express = require("express");
-
 const multer = require("multer");
 const path = require("path");
 const Customer = require("../models/Customer");
-
+const auth = require("../middleware/auth");
 
 const router = express.Router();
 
-// ✅ Setup multer for image uploads
+// Multer Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, path.join(__dirname, "../uploads"));
@@ -18,36 +17,56 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ Add a new customer
-router.post("/", upload.single("photo"), async (req, res) => {
+// --------------------- ADD CUSTOMER ---------------------
+router.post("/", auth, upload.single("photo"), async (req, res) => {
+  console.log("REQ BODY:", req.body);
+
   try {
-    const { id, name, address, phone } = req.body;
-    if (!id || !name)
-      return res.status(400).json({ success: false, message: "Missing fields" });
+    const { id, name, phone, defaultLitres } = req.body;
 
-    // prevent duplicate IDs
-    const existing = await Customer.findOne({ id });
-    if (existing)
-      return res
-        .status(400)
-        .json({ success: false, message: "Customer ID already exists" });
+    if (!id || id.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Customer ID is required",
+      });
+    }
 
-    const photo = req.file ? `/uploads/${req.file.filename}` : null;
+    const newCustomer = {
+      id: id.trim(),
+      name,
+      phone,
+      defaultLitres,
+      // If admin sends sellerId, use that. Otherwise use logged-in user.
+      sellerId: req.user.role === "admin" && req.body.sellerId
+        ? req.body.sellerId
+        : req.user.id,
 
-    const newCustomer = new Customer({ id, name, address, phone, photo });
-    await newCustomer.save();
+      photoUrl: req.file ? `/uploads/${req.file.filename}` : "",
+    };
 
-    res.json({ success: true, message: "Customer added successfully", data: newCustomer });
+    const created = await Customer.create(newCustomer);
+
+    res.json({
+      success: true,
+      data: created,
+      message: "Customer added successfully",
+    });
   } catch (err) {
     console.error("Error adding customer:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 
-// ✅ Get all customers
-router.get("/", async (req, res) => {
+
+
+// --------------------- GET ALL CUSTOMERS ---------------------
+router.get("/", auth, async (req, res) => {
   try {
-    const customers = await Customer.find({});
+    const sellerId = req.user.id;
+    const customers = await Customer.find({ sellerId });
     res.json(customers);
   } catch (err) {
     console.error("Error fetching customers:", err);
@@ -55,12 +74,16 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ✅ Get single customer by MongoDB _id or custom id
-router.get("/:id", async (req, res) => {
+// --------------------- GET SINGLE CUSTOMER ---------------------
+router.get("/:id", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const id = req.params.id;
+
     const customer =
-      (await Customer.findOne({ id })) || (await Customer.findById(id));
+      (await Customer.findOne({ sellerId, id })) ||
+      (await Customer.findOne({ sellerId, _id: id }));
+
     if (!customer)
       return res
         .status(404)
@@ -73,18 +96,19 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ✅ Update customer
-router.put("/:id", upload.single("photo"), async (req, res) => {
+// --------------------- UPDATE CUSTOMER ---------------------
+router.put("/:id", auth, upload.single("photo"), async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const id = req.params.id;
     const { name, address, phone } = req.body;
 
     const updateData = { name, address, phone };
-    if (req.file) updateData.photo = `/uploads/${req.file.filename}`;
+    if (req.file) updateData.imagePath = `/uploads/${req.file.filename}`;
 
     const customer =
-      (await Customer.findOneAndUpdate({ id }, updateData, { new: true })) ||
-      (await Customer.findByIdAndUpdate(id, updateData, { new: true }));
+      (await Customer.findOneAndUpdate({ sellerId, id }, updateData, { new: true })) ||
+      (await Customer.findOneAndUpdate({ sellerId, _id: id }, updateData, { new: true }));
 
     if (!customer)
       return res
@@ -98,39 +122,17 @@ router.put("/:id", upload.single("photo"), async (req, res) => {
   }
 });
 
-// ✅ Mark customer as paid for a specific month
-router.put("/:id/pay", async (req, res) => {
+// --------------------- DELETE CUSTOMER ---------------------
+router.delete("/:id", auth, async (req, res) => {
   try {
-    const { month } = req.body; // Example: "2025-11"
-    if (!month) {
-      return res.status(400).json({ success: false, message: "Month required" });
-    }
-
-    const customer = await Customer.findOne({ id: req.params.id });
-    if (!customer) {
-      return res.status(404).json({ success: false, message: "Customer not found" });
-    }
-
-    // ✅ Update or create payment record for that month
-    customer.payments.set(month, true);
-    await customer.save();
-
-    res.json({ success: true, message: "Payment updated successfully", data: customer });
-  } catch (err) {
-    console.error("Error marking payment:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-
-// ✅ Delete customer
-router.delete("/:id", async (req, res) => {
-  try {
+    const sellerId = req.user.id;
     const id = req.params.id;
-    const customer =
-      (await Customer.findOneAndDelete({ id })) || (await Customer.findByIdAndDelete(id));
 
-    if (!customer)
+    const deleted =
+      (await Customer.findOneAndDelete({ sellerId, id })) ||
+      (await Customer.findOneAndDelete({ sellerId, _id: id }));
+
+    if (!deleted)
       return res
         .status(404)
         .json({ success: false, message: "Customer not found" });
@@ -141,43 +143,5 @@ router.delete("/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-// ✅ Mark as paid
-router.put("/:id/pay", async (req, res) => {
-  try {
-    const { month } = req.body;
-    const customer = await Customer.findOne({ id: req.params.id });
-    if (!customer) return res.status(404).json({ message: "Customer not found" });
-
-    customer.payments = customer.payments || {};
-    customer.payments[month] = true;
-    await customer.save();
-
-    res.json({ success: true, message: "Payment marked as paid", data: customer });
-  } catch (err) {
-    console.error("Error marking as paid:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ✅ Mark as unpaid
-router.put("/:id/unpay", async (req, res) => {
-  try {
-    const { month } = req.body;
-    const customer = await Customer.findOne({ id: req.params.id });
-    if (!customer) return res.status(404).json({ message: "Customer not found" });
-
-    if (customer.payments && customer.payments[month]) {
-      delete customer.payments[month];
-      await customer.save();
-    }
-
-    res.json({ success: true, message: "Payment reverted to unpaid", data: customer });
-  } catch (err) {
-    console.error("Error marking as unpaid:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
 
 module.exports = router;

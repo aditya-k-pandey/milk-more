@@ -4,22 +4,27 @@ const Payment = require("../models/Payment");
 const Customer = require("../models/Customer");
 const Entry = require("../models/Entry");
 const Settings = require("../models/Settings");
+const auth = require("../middleware/auth");
 
-// ✅ Get Paid / Unpaid customers for current month
-router.get("/status", async (req, res) => {
+// --------------------- GET PAID / UNPAID STATUS ---------------------
+router.get("/status", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { month, year } = req.query;
+
     if (!month || !year)
       return res.status(400).json({ message: "Month and Year required" });
 
     const monthNum = parseInt(month);
     const yearNum = parseInt(year);
 
-    const payments = await Payment.find({ month, year });
+    const payments = await Payment.find({ sellerId, month, year });
     const paidIds = payments.map((p) => p.customerId);
 
-    const customers = await Customer.find();
-    const entries = await Entry.find();
+    // get only seller customers
+    const customers = await Customer.find({ sellerId });
+
+    const entries = await Entry.find({ sellerId });
 
     const monthlyEntries = entries.filter((e) => {
       const d = new Date(e.date);
@@ -45,19 +50,21 @@ router.get("/status", async (req, res) => {
   }
 });
 
-// ✅ Mark as Paid
-router.post("/mark-paid", async (req, res) => {
+// --------------------- MARK AS PAID ---------------------
+router.post("/mark-paid", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { customerId, month, year, method } = req.body;
 
     if (!customerId || !month || !year)
       return res.status(400).json({ success: false, message: "Missing fields" });
 
-    const existing = await Payment.findOne({ customerId, month, year });
+    const existing = await Payment.findOne({ sellerId, customerId, month, year });
     if (existing)
       return res.json({ success: false, message: "Already marked as paid" });
 
     const newPayment = new Payment({
+      sellerId,
       customerId,
       month,
       year,
@@ -68,7 +75,7 @@ router.post("/mark-paid", async (req, res) => {
 
     await newPayment.save();
 
-    const customer = await Customer.findOne({ id: customerId });
+    const customer = await Customer.findOne({ sellerId, id: customerId });
     if (customer) {
       const monthCode = `${year}-${String(month).padStart(2, "0")}`;
       customer.payments.set(monthCode, true);
@@ -82,17 +89,18 @@ router.post("/mark-paid", async (req, res) => {
   }
 });
 
-// ✅ Mark as Unpaid
-router.post("/mark-unpaid", async (req, res) => {
+// --------------------- MARK AS UNPAID ---------------------
+router.post("/mark-unpaid", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { customerId, month, year } = req.body;
 
     if (!customerId || !month || !year)
       return res.status(400).json({ success: false, message: "Missing fields" });
 
-    await Payment.deleteOne({ customerId, month, year });
+    await Payment.deleteOne({ sellerId, customerId, month, year });
 
-    const customer = await Customer.findOne({ id: customerId });
+    const customer = await Customer.findOne({ sellerId, id: customerId });
     if (customer) {
       const monthCode = `${year}-${String(month).padStart(2, "0")}`;
       if (customer.payments.has(monthCode)) {
@@ -108,50 +116,53 @@ router.post("/mark-unpaid", async (req, res) => {
   }
 });
 
-// ✅ Get & Update milk rate
-router.get("/settings/rate", async (req, res) => {
+// --------------------- MILK RATE GET ---------------------
+router.get("/settings/rate", auth, async (req, res) => {
   try {
-    const s = await Settings.findOne({ key: "milkRate" });
+    const sellerId = req.user.id;
+    const s = await Settings.findOne({ sellerId, key: "milkRate" });
     const rate = s ? Number(s.value) : 55;
     res.json({ rate });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-router.put("/settings/rate", async (req, res) => {
+// --------------------- MILK RATE UPDATE ---------------------
+router.put("/settings/rate", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { rate } = req.body;
+
     if (rate == null)
       return res.status(400).json({ success: false, message: "Rate required" });
 
     const r = await Settings.findOneAndUpdate(
-      { key: "milkRate" },
+      { sellerId, key: "milkRate" },
       { value: Number(rate) },
       { upsert: true, new: true }
     );
     res.json({ success: true, rate: Number(r.value) });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ✅ Full Summary for one customer (across all months)
-router.get("/summary/customer/:id", async (req, res) => {
+// --------------------- CUSTOMER SUMMARY ---------------------
+router.get("/summary/customer/:id", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { id } = req.params;
 
-    const s = await Settings.findOne({ key: "milkRate" });
+    const s = await Settings.findOne({ sellerId, key: "milkRate" });
     const rate = s ? Number(s.value) : 55;
 
-    const entries = await Entry.find({ customerId: id });
+    const entries = await Entry.find({ sellerId, customerId: id });
 
     const totalLitres = entries.reduce((sum, e) => sum + (e.litres || 0), 0);
     const totalAmount = Number((totalLitres * rate).toFixed(2));
 
-    const payments = await Payment.find({ customerId: id });
+    const payments = await Payment.find({ sellerId, customerId: id });
 
     res.json({
       success: true,
@@ -167,17 +178,20 @@ router.get("/summary/customer/:id", async (req, res) => {
   }
 });
 
-// ✅ Monthly Summary for one customer
-router.get("/summary/monthly", async (req, res) => {
+// --------------------- MONTHLY SUMMARY ---------------------
+router.get("/summary/monthly", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { customerId, month, year } = req.query;
+
     if (!customerId || !month || !year)
       return res.status(400).json({ message: "Missing params" });
 
     const monthNum = parseInt(month);
     const yearNum = parseInt(year);
 
-    const entries = await Entry.find({ customerId });
+    const entries = await Entry.find({ sellerId, customerId });
+
     const monthly = entries.filter((e) => {
       const d = new Date(e.date);
       return d.getMonth() + 1 === monthNum && d.getFullYear() === yearNum;
@@ -185,12 +199,13 @@ router.get("/summary/monthly", async (req, res) => {
 
     const totalLitres = monthly.reduce((s, e) => s + (e.litres || 0), 0);
 
-    const s = await Settings.findOne({ key: "milkRate" });
+    const s = await Settings.findOne({ sellerId, key: "milkRate" });
     const rate = s ? Number(s.value) : 55;
 
     const totalAmount = Number((totalLitres * rate).toFixed(2));
 
     const paidRecord = await Payment.findOne({
+      sellerId,
       customerId,
       month: String(monthNum),
       year: String(yearNum),
@@ -200,25 +215,25 @@ router.get("/summary/monthly", async (req, res) => {
 
     res.json({ customerId, totalLitres, totalAmount, rate, paid });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✅ Collect payment
-router.post("/payments/collect", async (req, res) => {
+// --------------------- COLLECT PAYMENT ---------------------
+router.post("/payments/collect", auth, async (req, res) => {
   try {
+    const sellerId = req.user.id;
     const { customerId, month, year, method, paidBy } = req.body;
-    if (!customerId || !month || !year || !method)
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing fields" });
 
-    const existing = await Payment.findOne({ customerId, month, year });
+    if (!customerId || !month || !year || !method)
+      return res.status(400).json({ success: false, message: "Missing fields" });
+
+    const existing = await Payment.findOne({ sellerId, customerId, month, year });
     if (existing)
       return res.json({ success: false, message: "Already paid" });
 
     const payment = new Payment({
+      sellerId,
       customerId,
       month,
       year,
@@ -227,9 +242,10 @@ router.post("/payments/collect", async (req, res) => {
       paidBy: paidBy || null,
       date: new Date(),
     });
+
     await payment.save();
 
-    const customer = await Customer.findOne({ id: customerId });
+    const customer = await Customer.findOne({ sellerId, id: customerId });
     if (customer) {
       const monthCode = `${year}-${String(month).padStart(2, "0")}`;
       customer.payments.set(monthCode, true);
@@ -238,7 +254,6 @@ router.post("/payments/collect", async (req, res) => {
 
     res.json({ success: true, message: "Payment recorded", payment });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
